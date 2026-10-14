@@ -2,7 +2,7 @@
 // Fetches per-client / per-workflow / per-month task usage from n8n and renders
 // KPI tiles, a stacked bar (tasks per client by workflow), a monthly trend and a detail table.
 
-const API_URL = 'https://n8n.profitpad.com/webhook/n8n-tools-api?request=tasks';
+// Shared helpers (fmt, esc, monthLabel, clientLink, normalizeTasks, monthMax, ...) live in ../assets/common.js.
 
 // Categorical slots in fixed order. A client's workflows are ranked by all-time tasks;
 // ranks 1..MAX_NAMED get their own slot, the rest fold into "Other".
@@ -13,7 +13,8 @@ const MAX_SLOTS = SERIES.length;
 const state = {
   clients: [],     // normalized data, see normalize()
   months: [],      // sorted list of 'YYYY-MM'
-  month: 'all',    // active month filter
+  month: null,     // active month filter ('all' or 'YYYY-MM'); set on first load
+  trendFocus: null, // client name highlighted on the trend chart, or null
   sortKey: 'tasks',
   sortDir: -1,
   search: '',
@@ -37,72 +38,25 @@ const segmentYAlign = ctx => (ctx.tooltip._segmentAbove ? 'bottom' : 'top');
 
 // ---------- Helpers ----------
 
-const fmt = n => Number(n || 0).toLocaleString('en-US');
-
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
-
-function monthLabel(ym, long) {
-  const [y, m] = ym.split('-').map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: long ? 'long' : 'short', year: 'numeric' });
-}
-
-function titleCase(s) {
-  return String(s).replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
 function inMonth(m) {
   return state.month === 'all' || m.month === state.month;
 }
 
 // ---------- Data ----------
 
-// Turns the API payload into:
-// [{ name, label, workflows: [{ id, name, slot, months: [...] }] }]
+// Adds dashboard-only fields to the shared normalizeTasks() result:
+// workflow color `slot` (0..MAX_SLOTS-1 or 'other') and a client `color`.
 // Slot assignment uses all-time totals so colors never shift when the month filter changes.
 function normalize(payload) {
-  const results = Array.isArray(payload?.results) ? payload.results : [];
-  const monthSet = new Set();
-
-  const clients = results.map(c => {
-    const workflows = (c.workflows || []).map(w => {
-      const months = (w.months || []).map(m => {
-        monthSet.add(m.month);
-        return {
-          month: m.month,
-          executions: Number(m.count_executions) || 0,
-          tasks: Number(m.sum_tasks_used) || 0,
-          firstRun: m.first_run_at || null,
-          lastRun: m.recent_run_at || null,
-        };
-      });
-      return {
-        id: w.workflow_id,
-        name: w.workflow_name || w.workflow_id,
-        months,
-        allTimeTasks: months.reduce((s, m) => s + m.tasks, 0),
-      };
-    });
-
-    workflows.sort((a, b) => b.allTimeTasks - a.allTimeTasks || a.name.localeCompare(b.name));
+  const { clients, months } = normalizeTasks(payload);
+  clients.forEach(c => {
     // If everything fits in the palette, every workflow gets a slot; otherwise keep MAX_SLOTS-1 named + Other.
-    const named = workflows.length <= MAX_SLOTS ? MAX_SLOTS : MAX_SLOTS - 1;
-    workflows.forEach((w, i) => { w.slot = i < named ? i : 'other'; });
-
-    // Monthly task caps as date ranges: [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', max }].
-    const caps = (Array.isArray(c.max_tasks) ? c.max_tasks : [])
-      .map(r => ({ from: r.from || '0000-01-01', to: r.to || '9999-12-31', max: Number(r.max) }))
-      .filter(r => r.max > 0);
-
-    return { name: c.client_name, label: titleCase(c.client_name), workflows, caps };
+    const named = c.workflows.length <= MAX_SLOTS ? MAX_SLOTS : MAX_SLOTS - 1;
+    c.workflows.forEach((w, i) => { w.slot = i < named ? i : 'other'; });
   });
-
-  clients.sort((a, b) => a.name.localeCompare(b.name));
   // Client color for the trend chart follows the client (alphabetical), never its rank.
   clients.forEach((c, i) => { c.color = SERIES[i % SERIES.length]; });
-
-  return { clients, months: [...monthSet].sort() };
+  return { clients, months };
 }
 
 // Aggregates one workflow across the active month filter.
@@ -113,16 +67,6 @@ function workflowTotals(w) {
     executions: ms.reduce((s, m) => s + m.executions, 0),
     lastRun: ms.map(m => m.lastRun).filter(Boolean).sort().pop() || null,
   };
-}
-
-// The client's monthly task max for 'YYYY-MM', or null if none applies. If several ranges
-// overlap the month, the one that starts latest wins.
-function monthMax(c, ym) {
-  const hit = c.caps
-    .filter(r => r.from <= `${ym}-31` && r.to >= `${ym}-01`)
-    .sort((a, b) => a.from.localeCompare(b.from))
-    .pop();
-  return hit ? hit.max : null;
 }
 
 // The client's max for the active period: that month's max, or for "All time" the sum of the
@@ -171,7 +115,7 @@ function renderShell() {
         <div class="card-head">
           <div>
             <h2>Monthly tasks by client</h2>
-            <div class="sub">All months in the data set, regardless of the month filter. Log scale. Dashed ticks mark each client's monthly max (red when exceeded).</div>
+            <div class="sub" id="trend-sub"></div>
           </div>
         </div>
         <div class="chart-wrap" style="height:300px"><canvas id="trend-chart" aria-label="Bar chart of monthly tasks by client" role="img"></canvas></div>
@@ -254,6 +198,12 @@ function renderStack() {
     };
   }).filter(d => d.tasks.some(v => v > 0));
 
+  const axisClient = (e, chart) => {
+    const y = chart.scales.y;
+    if (e.x < y.left || e.x > y.right || e.y < y.top || e.y > y.bottom) return null;
+    return clients[Math.round(y.getValueForPixel(e.y))]?.c || null;
+  };
+
   const names = (clientIdx, slot) => clients[clientIdx].wf.filter(y => y.w.slot === slot);
 
   document.getElementById('stack-sub').textContent =
@@ -269,6 +219,14 @@ function renderStack() {
     options: {
       indexAxis: 'y',
       layout: { padding: { top: 12 } },
+      // Clicking a client label on the y axis opens its HubSpot deal.
+      onClick: (e, _els, chart) => {
+        const c = axisClient(e, chart);
+        if (c?.dealLink) window.open(c.dealLink, '_blank', 'noopener');
+      },
+      onHover: (e, _els, chart) => {
+        chart.canvas.style.cursor = axisClient(e, chart)?.dealLink ? 'pointer' : '';
+      },
       maintainAspectRatio: false,
       animation: { duration: 300 },
       interaction: { mode: 'point', intersect: true },
@@ -328,7 +286,7 @@ function renderStack() {
     if (other.length) items.push({ color: OTHER_COLOR, name: `Other (${other.length} workflows)`, tasks: other.reduce((s, y) => s + y.tasks, 0) });
     return `
       <div>
-        <div class="legend-client">${esc(x.c.label)} <span class="${x.max != null && x.total > x.max ? 'over' : ''}">${fmt(x.total)}${x.max ? ` of ${fmt(x.max)} max` : ''}</span></div>
+        <div class="legend-client">${clientLink(x.c, 'client-link')} <span class="${x.max != null && x.total > x.max ? 'over' : ''}">${fmt(x.total)}${x.max ? ` of ${fmt(x.max)} max` : ''}</span></div>
         <ul class="legend-list">
           ${items.map(i => `
             <li class="${i.tasks ? '' : 'zero'}" title="${esc(i.name)}">
@@ -344,8 +302,10 @@ function renderStack() {
 function renderTrend() {
   const datasets = state.clients.map(c => ({
     label: c.label,
-    data: state.months.map(m => c.workflows.reduce((s, w) => s + w.months.filter(x => x.month === m).reduce((a, x) => a + x.tasks, 0), 0)),
+    client: c.name,
+    color: c.color,
     backgroundColor: c.color,
+    data: state.months.map(m => c.workflows.reduce((s, w) => s + w.months.filter(x => x.month === m).reduce((a, x) => a + x.tasks, 0), 0)),
     borderColor: '#fff',
     borderWidth: 2,
     borderRadius: { topLeft: 4, topRight: 4 },
@@ -353,10 +313,7 @@ function renderTrend() {
     maxBarThickness: 36,
     maxes: state.months.map(m => monthMax(c, m)),
   }));
-
-  // Top of the log axis: the next power of ten above every bar and every max.
-  const peak = Math.max(1, ...datasets.flatMap(d => [...d.data, ...d.maxes.filter(v => v != null)]));
-  const yMax = 10 ** Math.ceil(Math.log10(peak) + 1e-9);
+  if (state.trendFocus && !datasets.some(d => d.client === state.trendFocus)) state.trendFocus = null;
 
   charts.trend?.destroy();
   charts.trend = new Chart(document.getElementById('trend-chart'), {
@@ -371,7 +328,29 @@ function renderTrend() {
         legend: {
           position: 'top',
           align: 'end',
-          labels: { boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 3, color: '#5a6070', font: { size: 12 } },
+          // Clicking a client focuses it (others hidden, axis goes linear); clicking it again clears focus.
+          onClick: (_e, item) => {
+            const client = datasets[item.datasetIndex].client;
+            state.trendFocus = state.trendFocus === client ? null : client;
+            applyTrendFocus();
+          },
+          onHover: e => { e.native.target.style.cursor = 'pointer'; },
+          onLeave: e => { e.native.target.style.cursor = ''; },
+          labels: {
+            boxWidth: 10, boxHeight: 10, useBorderRadius: true, borderRadius: 3, font: { size: 12 },
+            generateLabels: chart => chart.data.datasets.map((d, i) => {
+              const dim = state.trendFocus && state.trendFocus !== d.client;
+              return {
+                text: d.label,
+                datasetIndex: i,
+                fillStyle: dim ? d.color + '55' : d.color,
+                strokeStyle: dim ? d.color + '55' : d.color,
+                lineWidth: 0,
+                borderRadius: 3,
+                fontColor: dim ? '#b4bac6' : state.trendFocus ? '#1a1d23' : '#5a6070',
+              };
+            }),
+          },
         },
         tooltip: {
           ...tooltipStyle(),
@@ -386,21 +365,52 @@ function renderTrend() {
       scales: {
         x: { grid: { display: false }, border: { color: '#d8dce6' }, ticks: { color: '#5a6070', font: { size: 12 } } },
         y: {
-          type: 'logarithmic',
-          min: 1,
-          max: yMax,
           grid: { color: '#eef0f4' },
           border: { display: false },
-          // Only label powers of ten (1, 10, 100, ...).
-          ticks: {
-            color: '#9aa0af',
-            font: { family: 'DM Mono', size: 11 },
-            callback: v => (Number.isInteger(Math.log10(v)) ? fmt(v) : ''),
-          },
+          ticks: { color: '#9aa0af', font: { family: 'DM Mono', size: 11 } },
         },
       },
     },
   });
+  applyTrendFocus();
+}
+
+// Applies state.trendFocus to the trend chart. No focus: every client on a log axis.
+// Focus: other clients are hidden (still listed, dimmed, in the legend so you can switch)
+// and the axis turns linear, sized to the focused client's bars and maxes.
+function applyTrendFocus() {
+  const chart = charts.trend;
+  const focus = state.trendFocus;
+  const peakOf = ds => Math.max(1, ...ds.flatMap(d => [...d.data, ...d.maxes.filter(v => v != null)]));
+
+  chart.data.datasets.forEach((d, i) => chart.setDatasetVisibility(i, !focus || focus === d.client));
+
+  const y = chart.options.scales.y;
+  if (focus) {
+    y.type = 'linear';
+    y.min = 0;
+    y.max = niceCeil(peakOf(chart.data.datasets.filter(d => d.client === focus)) * 1.05);
+    y.ticks.callback = v => fmt(v);
+  } else {
+    // Top of the log axis: the next power of ten above every bar and every max.
+    y.type = 'logarithmic';
+    y.min = 1;
+    y.max = 10 ** Math.ceil(Math.log10(peakOf(chart.data.datasets)) + 1e-9);
+    // Only label powers of ten (1, 10, 100, ...).
+    y.ticks.callback = v => (Number.isInteger(Math.log10(v)) ? fmt(v) : '');
+  }
+
+  const label = focus ? state.clients.find(c => c.name === focus).label : null;
+  document.getElementById('trend-sub').textContent = focus
+    ? `All months in the data set, regardless of the month filter. Showing ${label} on a linear scale; click ${label} in the legend again to show all clients on a log scale. Dashed ticks mark the monthly max (red when exceeded).`
+    : "All months in the data set, regardless of the month filter. Log scale. Dashed ticks mark each client's monthly max (red when exceeded). Click a client in the legend to focus it.";
+  chart.update();
+}
+
+// Rounds up to a tidy axis maximum (1, 2, 2.5, 5 or 10 times a power of ten).
+function niceCeil(v) {
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].find(m => m * p >= v) * p;
 }
 
 function renderTable() {
@@ -430,7 +440,7 @@ function renderTable() {
 
   const body = list.length ? list.map(r => `
     <tr>
-      <td><span class="client-pill">${esc(r.client.label)}</span></td>
+      <td>${clientLink(r.client, 'client-pill')}</td>
       <td>${esc(r.workflow.name)}</td>
       <td class="num">${fmt(r.executions)}</td>
       <td class="num">${fmt(r.tasks)}</td>
@@ -502,6 +512,7 @@ const trendMaxPlugin = {
     chart.data.datasets.forEach((d, di) => {
       const meta = chart.getDatasetMeta(di);
       if (!chart.isDatasetVisible(di)) return;
+      if (state.trendFocus && state.trendFocus !== d.client) return;
       meta.data.forEach((bar, i) => {
         const max = d.maxes?.[i];
         if (!max) return;
@@ -545,11 +556,14 @@ function renderFiltered() {
 
 async function load() {
   try {
-    const res = await fetch(API_URL, { headers: { Accept: 'application/json' } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { clients, months } = normalize(await res.json());
+    const { clients, months } = normalize(await fetchApi('tasks'));
     state.clients = clients;
     state.months = months;
+    // Default to the current month, or the latest month in the data if this month has none.
+    if (state.month === null) {
+      const thisMonth = currentMonth();
+      state.month = months.includes(thisMonth) ? thisMonth : months[months.length - 1] || 'all';
+    }
     if (state.month !== 'all' && !months.includes(state.month)) state.month = 'all';
     state.loadedAt = new Date();
 

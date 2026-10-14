@@ -7,7 +7,8 @@ Internal dashboard for reporting on n8n usage per ProfitPad client.
 
 ## Reports
 
-- **Task Usage** (`/dashboard/`): tasks used per client broken down by workflow, monthly tasks by client (both marked with each client's max tasks per month), and a sortable workflow detail table. Filterable by month.
+- **Client Overview** (`/overview/`, the landing page): each client's tasks against their monthly max, and net server costs billed per month. Client names link to their HubSpot deal.
+- **Task Usage** (`/dashboard/`): tasks used per client broken down by workflow, monthly tasks by client (both marked with each client's max tasks per month), and a sortable workflow detail table. Filterable by month. Client names link to their HubSpot deal.
 
 ## Stack
 
@@ -15,6 +16,7 @@ Static site: plain HTML, CSS and vanilla JS, with [Chart.js](https://www.chartjs
 
 ```
 GET https://n8n.profitpad.com/webhook/n8n-tools-api?request=tasks
+GET https://n8n.profitpad.com/webhook/n8n-tools-api?request=server_cost
 ```
 
 The webhook only allows requests (CORS) from `https://clients.profitpad.com` and `http://localhost`, so opening the files directly from disk will not load data.
@@ -25,8 +27,9 @@ Everything served by the website lives in `docs/`, which is the web root. Projec
 
 ```
 docs/
-  index.html          Redirects to ./dashboard/
-  assets/             Shared styles.css, favicon and logo
+  index.html          Redirects to ./overview/
+  assets/             Shared styles.css, common.js, favicon and logo
+  overview/           Client Overview page (index.html + overview.js)
   dashboard/          Task Usage page (index.html + dashboard.js)
 AGENTS.md / CLAUDE.md Instructions for AI agents
 HANDOFF.md            Detailed project handoff: structure, data shape, how each report works
