@@ -90,7 +90,12 @@ function normalize(payload) {
     const named = workflows.length <= MAX_SLOTS ? MAX_SLOTS : MAX_SLOTS - 1;
     workflows.forEach((w, i) => { w.slot = i < named ? i : 'other'; });
 
-    return { name: c.client_name, label: titleCase(c.client_name), workflows };
+    // Monthly task caps as date ranges: [{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', max }].
+    const caps = (Array.isArray(c.max_tasks) ? c.max_tasks : [])
+      .map(r => ({ from: r.from || '0000-01-01', to: r.to || '9999-12-31', max: Number(r.max) }))
+      .filter(r => r.max > 0);
+
+    return { name: c.client_name, label: titleCase(c.client_name), workflows, caps };
   });
 
   clients.sort((a, b) => a.name.localeCompare(b.name));
@@ -108,6 +113,24 @@ function workflowTotals(w) {
     executions: ms.reduce((s, m) => s + m.executions, 0),
     lastRun: ms.map(m => m.lastRun).filter(Boolean).sort().pop() || null,
   };
+}
+
+// The client's monthly task max for 'YYYY-MM', or null if none applies. If several ranges
+// overlap the month, the one that starts latest wins.
+function monthMax(c, ym) {
+  const hit = c.caps
+    .filter(r => r.from <= `${ym}-31` && r.to >= `${ym}-01`)
+    .sort((a, b) => a.from.localeCompare(b.from))
+    .pop();
+  return hit ? hit.max : null;
+}
+
+// The client's max for the active period: that month's max, or for "All time" the sum of the
+// monthly maxes across every month in the data set. Null if no max applies.
+function periodMax(c) {
+  const ms = state.month === 'all' ? state.months : [state.month];
+  const vals = ms.map(m => monthMax(c, m)).filter(v => v != null);
+  return vals.length ? vals.reduce((s, v) => s + v, 0) : null;
 }
 
 function rows() {
@@ -148,7 +171,7 @@ function renderShell() {
         <div class="card-head">
           <div>
             <h2>Monthly tasks by client</h2>
-            <div class="sub">All months in the data set, regardless of the month filter. Log scale.</div>
+            <div class="sub">All months in the data set, regardless of the month filter. Log scale. Dashed ticks mark each client's monthly max (red when exceeded).</div>
           </div>
         </div>
         <div class="chart-wrap" style="height:300px"><canvas id="trend-chart" aria-label="Bar chart of monthly tasks by client" role="img"></canvas></div>
@@ -202,7 +225,7 @@ function renderKpis() {
 function renderStack() {
   const clients = state.clients.map(c => {
     const wf = c.workflows.map(w => ({ w, ...workflowTotals(w) }));
-    return { c, wf, total: wf.reduce((s, x) => s + x.tasks, 0) };
+    return { c, wf, total: wf.reduce((s, x) => s + x.tasks, 0), max: periodMax(c) };
   }).sort((a, b) => b.total - a.total);
 
   const hasOther = clients.some(x => x.wf.some(y => y.w.slot === 'other'));
@@ -211,7 +234,7 @@ function renderStack() {
   // Log scale: each bar's length is log10(client total), split into segments by each
   // workflow's share of that total. (A plain log axis on a stack distorts the segments.)
   const logLen = t => (t > 0 ? Math.log10(t) : 0);
-  const maxLog = Math.max(1, Math.ceil(Math.max(...clients.map(x => logLen(x.total)))));
+  const maxLog = Math.max(1, Math.ceil(Math.max(...clients.map(x => Math.max(logLen(x.total), logLen(x.max || 0))))));
 
   // One dataset per color slot; slot k means "the client's k-th workflow", so each bar
   // gets distinct colors and the tooltip resolves the actual workflow name per client.
@@ -234,15 +257,18 @@ function renderStack() {
   const names = (clientIdx, slot) => clients[clientIdx].wf.filter(y => y.w.slot === slot);
 
   document.getElementById('stack-sub').textContent =
-    `${state.month === 'all' ? 'All time' : monthLabel(state.month, true)}. Bar length is log scale; segments show each workflow's share of the client total. Hover a segment for the workflow.`;
+    `${state.month === 'all' ? 'All time' : monthLabel(state.month, true)}. Bar length is log scale; segments show each workflow's share of the client total. Hover a segment for the workflow. ` +
+    (state.month === 'all' ? 'Markers show the max tasks summed over every month in the data.' : 'Markers show the max tasks for the month.');
   document.getElementById('stack-wrap').style.height = Math.max(140, clients.length * 56 + 50) + 'px';
 
   charts.stack?.destroy();
   charts.stack = new Chart(document.getElementById('stack-chart'), {
     type: 'bar',
     data: { labels: clients.map(x => x.c.label), datasets },
+    plugins: [stackMaxPlugin],
     options: {
       indexAxis: 'y',
+      layout: { padding: { top: 12 } },
       maintainAspectRatio: false,
       animation: { duration: 300 },
       interaction: { mode: 'point', intersect: true },
@@ -264,12 +290,15 @@ function renderStack() {
             },
             footer: items => {
               const i = items[0].dataIndex;
-              const total = clients[i].total;
+              const { total, max } = clients[i];
               const t = items[0].dataset.tasks[i];
-              return total ? `${((t / total) * 100).toFixed(1)}% of ${fmt(total)} client total` : '';
+              const lines = total ? [`${((t / total) * 100).toFixed(1)}% of ${fmt(total)} client total`] : [];
+              if (max) lines.push(`${((total / max) * 100).toFixed(1)}% of ${fmt(max)} max`);
+              return lines;
             },
           },
         },
+        maxMarkers: { values: clients.map(x => (x.max ? logLen(x.max) : null)), labels: clients.map(x => x.max), over: clients.map(x => x.max != null && x.total > x.max) },
       },
       scales: {
         x: {
@@ -299,7 +328,7 @@ function renderStack() {
     if (other.length) items.push({ color: OTHER_COLOR, name: `Other (${other.length} workflows)`, tasks: other.reduce((s, y) => s + y.tasks, 0) });
     return `
       <div>
-        <div class="legend-client">${esc(x.c.label)} <span>${fmt(x.total)}</span></div>
+        <div class="legend-client">${esc(x.c.label)} <span class="${x.max != null && x.total > x.max ? 'over' : ''}">${fmt(x.total)}${x.max ? ` of ${fmt(x.max)} max` : ''}</span></div>
         <ul class="legend-list">
           ${items.map(i => `
             <li class="${i.tasks ? '' : 'zero'}" title="${esc(i.name)}">
@@ -322,12 +351,18 @@ function renderTrend() {
     borderRadius: { topLeft: 4, topRight: 4 },
     borderSkipped: 'bottom',
     maxBarThickness: 36,
+    maxes: state.months.map(m => monthMax(c, m)),
   }));
+
+  // Top of the log axis: the next power of ten above every bar and every max.
+  const peak = Math.max(1, ...datasets.flatMap(d => [...d.data, ...d.maxes.filter(v => v != null)]));
+  const yMax = 10 ** Math.ceil(Math.log10(peak) + 1e-9);
 
   charts.trend?.destroy();
   charts.trend = new Chart(document.getElementById('trend-chart'), {
     type: 'bar',
     data: { labels: state.months.map(m => monthLabel(m)), datasets },
+    plugins: [trendMaxPlugin],
     options: {
       maintainAspectRatio: false,
       animation: { duration: 300 },
@@ -340,7 +375,12 @@ function renderTrend() {
         },
         tooltip: {
           ...tooltipStyle(),
-          callbacks: { label: item => ` ${item.dataset.label}: ${fmt(item.raw)} tasks` },
+          callbacks: {
+            label: item => {
+              const max = item.dataset.maxes[item.dataIndex];
+              return ` ${item.dataset.label}: ${fmt(item.raw)} tasks` + (max ? ` of ${fmt(max)} max (${((item.raw / max) * 100).toFixed(1)}%)` : '');
+            },
+          },
         },
       },
       scales: {
@@ -348,6 +388,7 @@ function renderTrend() {
         y: {
           type: 'logarithmic',
           min: 1,
+          max: yMax,
           grid: { color: '#eef0f4' },
           border: { display: false },
           // Only label powers of ten (1, 10, 100, ...).
@@ -412,6 +453,70 @@ function renderMeta() {
     `Loaded ${esc(state.loadedAt.toLocaleString('en-US'))}<button type="button" id="refresh">Refresh</button>`;
   document.getElementById('refresh').addEventListener('click', load);
 }
+
+// ---------- Max markers ----------
+
+const MAX_COLOR = '#011028';
+const OVER_COLOR = '#e34948';
+
+// Stacked chart: a vertical tick across each client's bar at its max (in log10 units),
+// labeled with the max above the bar. Values come from options.plugins.maxMarkers.
+const stackMaxPlugin = {
+  id: 'maxMarkers',
+  afterDatasetsDraw(chart, _args, opts) {
+    const { ctx, scales: { x, y } } = chart;
+    ctx.save();
+    (opts.values || []).forEach((v, i) => {
+      if (v == null) return;
+      const px = x.getPixelForValue(v);
+      const py = y.getPixelForValue(i);
+      const color = opts.over[i] ? OVER_COLOR : MAX_COLOR;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(px, py - 19);
+      ctx.lineTo(px, py + 19);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = '11px "DM Mono", monospace';
+      ctx.textBaseline = 'bottom';
+      const text = `max ${fmt(opts.labels[i])}`;
+      const w = ctx.measureText(text).width;
+      // Keep the label inside the chart area.
+      ctx.textAlign = px + w / 2 > chart.chartArea.right ? 'right' : 'center';
+      ctx.fillText(text, ctx.textAlign === 'right' ? px - 4 : px, py - 20);
+    });
+    ctx.restore();
+  },
+};
+
+// Trend chart: a dashed horizontal tick over each client's bar at that month's max.
+const trendMaxPlugin = {
+  id: 'trendMax',
+  afterDatasetsDraw(chart) {
+    const { ctx, scales: { y } } = chart;
+    ctx.save();
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    chart.data.datasets.forEach((d, di) => {
+      const meta = chart.getDatasetMeta(di);
+      if (!chart.isDatasetVisible(di)) return;
+      meta.data.forEach((bar, i) => {
+        const max = d.maxes?.[i];
+        if (!max) return;
+        const py = y.getPixelForValue(max);
+        const half = bar.width / 2 + 3;
+        ctx.strokeStyle = d.data[i] > max ? OVER_COLOR : MAX_COLOR;
+        ctx.beginPath();
+        ctx.moveTo(bar.x - half, py);
+        ctx.lineTo(bar.x + half, py);
+        ctx.stroke();
+      });
+    });
+    ctx.restore();
+  },
+};
 
 function tooltipStyle() {
   return {

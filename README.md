@@ -7,7 +7,7 @@ Internal dashboard for reporting on n8n usage per ProfitPad client.
 
 ## Reports
 
-- **Task Usage** (`/dashboard/`): tasks used per client broken down by workflow, monthly tasks by client, and a sortable workflow detail table. Filterable by month.
+- **Task Usage** (`/dashboard/`): tasks used per client broken down by workflow, monthly tasks by client (both marked with each client's max tasks per month), and a sortable workflow detail table. Filterable by month.
 
 ## Stack
 

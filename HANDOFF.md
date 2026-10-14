@@ -66,6 +66,10 @@ Response shape:
   "results": [
     {
       "client_name": "camo",
+      "deal_link": "https://app.hubspot.com/contacts/44271052/record/0-3/61032290442",
+      "max_tasks": [
+        { "from": "2026-08-01", "to": "2100-12-31", "max": 10000 }
+      ],
       "workflows": [
         {
           "workflow_id": "2EBH3DXVC82Jw2MZ",
@@ -88,21 +92,23 @@ Response shape:
 
 - One entry per client, one entry per workflow, one entry per month (`YYYY-MM`) that workflow ran.
 - A workflow only has entries for months it actually ran.
+- `max_tasks` is the client's maximum tasks per month, as a list of date ranges (`from`/`to` inclusive, `YYYY-MM-DD`). A client may have no `max_tasks` (profitpad currently has none), in which case no max is shown. `deal_link` (HubSpot deal URL) is present on some clients but not used yet.
 - At the time of writing there were 3 clients (camo, profitpad, sage), 27 workflows, months 2026-08 to 2026-10.
 
 ## How the Task Usage page works (`docs/dashboard/dashboard.js`)
 
 1. `load()` fetches the API, calls `normalize()`, stores results in `state`, and renders. A "Refresh" link at the bottom re-runs `load()`.
 2. `normalize()` converts the payload into `state.clients`:
-   `[{ name, label, color, workflows: [{ id, name, months: [{month, executions, tasks, firstRun, lastRun}], allTimeTasks, slot }] }]`
+   `[{ name, label, color, caps: [{from, to, max}], workflows: [{ id, name, months: [{month, executions, tasks, firstRun, lastRun}], allTimeTasks, slot }] }]`
    - Clients are sorted alphabetically; `label` is title-cased (`camo` to `Camo`).
    - Each client gets a fixed categorical `color` by alphabetical position (used in the monthly trend chart).
    - Each client's workflows are ranked by **all-time** tasks and given a color `slot` 0..7. If a client has more than 8 workflows, ranks 1 to 7 get slots and the rest are folded into `'other'` (gray). Slots use all-time totals so colors do not change when the month filter changes.
+   - `monthMax(client, 'YYYY-MM')` returns the max for a month (the range overlapping that month; if several overlap, the one starting latest wins), or null. `periodMax(client)` returns the max for the active filter: that month's max, or for "All time" the **sum** of monthly maxes across every month in the data set.
 3. `state.month` is the active month filter (`'all'` or `YYYY-MM`). Filter buttons are built from every month present in the data.
 4. Reports rendered:
    - **KPI tiles** (`renderKpis`): tasks used, executions (with tasks per execution), active clients, active workflows, for the selected period.
-   - **Tasks per client, by workflow** (`renderStack`): the main requested report. Horizontal stacked Chart.js bar, one bar per client sorted by total. There is one dataset per color slot (slot k = that client's k-th workflow), so each bar has distinct segment colors and the tooltip looks up the real workflow name per client. **Log scale:** each bar's length is `log10(client total)` and is split into segments by each workflow's share of that total (the x axis is linear in log10 units, labeled 1, 10, 100, ...). A plain logarithmic axis is deliberately not used on this stacked chart, because it would distort segment sizes. Each dataset keeps real values in `dataset.tasks`; `dataset.data` holds the scaled lengths, so tooltips must read `tasks`, not `raw`. Under the chart is a per-client legend listing each workflow with its swatch and task count. Respects the month filter.
-   - **Monthly tasks by client** (`renderTrend`): grouped vertical bar, x = month, one series per client. Always shows all months (ignores the filter). Standard Chart.js logarithmic y axis (min 1, labels only on powers of ten); zero months simply show no bar.
+   - **Tasks per client, by workflow** (`renderStack`): the main requested report. Horizontal stacked Chart.js bar, one bar per client sorted by total. There is one dataset per color slot (slot k = that client's k-th workflow), so each bar has distinct segment colors and the tooltip looks up the real workflow name per client. **Log scale:** each bar's length is `log10(client total)` and is split into segments by each workflow's share of that total (the x axis is linear in log10 units, labeled 1, 10, 100, ...). A plain logarithmic axis is deliberately not used on this stacked chart, because it would distort segment sizes. Each dataset keeps real values in `dataset.tasks`; `dataset.data` holds the scaled lengths, so tooltips must read `tasks`, not `raw`. **Max markers:** the `stackMaxPlugin` Chart.js plugin draws a vertical navy tick at `log10(periodMax)` across each client's bar, labeled `max N` (red if the client is over its max); the x axis extends to cover the max. The tooltip footer shows the percent of max. Under the chart is a per-client legend listing each workflow with its swatch and task count, with the header showing `total of max`. Respects the month filter.
+   - **Monthly tasks by client** (`renderTrend`): grouped vertical bar, x = month, one series per client. Always shows all months (ignores the filter). Standard Chart.js logarithmic y axis (min 1, labels only on powers of ten); zero months simply show no bar. **Max markers:** each dataset carries `maxes` (per month, from `monthMax`), and `trendMaxPlugin` draws a dashed navy tick over each client's bar at that month's max (red when exceeded). The y axis max is the next power of ten above all bars and maxes. Tooltips show `of N max (x%)`.
    - **Workflow detail** (`renderTable`): sortable table (click headers) of client, workflow, executions, tasks, tasks/exec, last run, with a text search. Respects the month filter.
 5. All API strings are HTML-escaped with `esc()` before being inserted.
 
