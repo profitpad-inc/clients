@@ -1,0 +1,255 @@
+/* Shared ProfitPad Clients styles. Visual language matches demo.profitpad.com. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --navy: #011028;
+  --blue: #0671C0;
+  --blue-tint: #eef5fc;
+  --bg: #f4f5f7;
+  --surface: #fff;
+  --border: #e4e7ef;
+  --border-strong: #d8dce6;
+  --text: #1a1d23;
+  --text-secondary: #5a6070;
+  --text-muted: #9aa0af;
+  --sidebar-w: 232px;
+  --nav-h: 64px;
+}
+
+body {
+  font-family: Inter, "Trebuchet MS", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: "Eastman Roman", Verdana, sans-serif;
+}
+
+/* ---------- Top nav ---------- */
+nav.topnav {
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  height: var(--nav-h);
+  background: linear-gradient(to bottom right, var(--navy), var(--blue));
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+nav.topnav img {
+  height: 48px;
+  display: block;
+}
+
+/* ---------- Layout ---------- */
+.layout {
+  display: flex;
+  min-height: calc(100vh - var(--nav-h));
+}
+
+.sidebar {
+  width: var(--sidebar-w);
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1.5px solid var(--border);
+  padding: 24px 12px;
+  position: sticky;
+  top: var(--nav-h);
+  height: calc(100vh - var(--nav-h));
+  overflow-y: auto;
+}
+
+.sidebar-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0 12px 10px;
+}
+
+.sidebar ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  position: relative;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar a svg {
+  flex-shrink: 0;
+}
+
+.sidebar a:hover {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.sidebar a.active {
+  background: var(--blue-tint);
+  color: var(--blue);
+}
+
+.sidebar a.active::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(to bottom, var(--navy), var(--blue));
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.header {
+  margin-bottom: 28px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header h1 {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--navy);
+  letter-spacing: -0.5px;
+}
+
+.header p {
+  margin-top: 8px;
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  position: relative;
+  overflow: hidden;
+}
+
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(to right, var(--navy), var(--blue));
+}
+
+.card h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card .sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.mono {
+  font-family: 'DM Mono', monospace;
+}
+
+/* ---------- States ---------- */
+.state {
+  text-align: center;
+  padding: 60px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin: 0 auto 12px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Mobile ---------- */
+@media (max-width: 800px) {
+  nav.topnav {
+    padding: 0 16px;
+  }
+
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    border-right: none;
+    border-bottom: 1.5px solid var(--border);
+    padding: 8px 16px;
+  }
+
+  .sidebar-label {
+    display: none;
+  }
+
+  .sidebar ul {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .sidebar a.active::before {
+    display: none;
+  }
+
+  .page {
+    padding: 24px 16px 60px;
+  }
+}
