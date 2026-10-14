@@ -148,7 +148,7 @@ function renderShell() {
         <div class="card-head">
           <div>
             <h2>Monthly tasks by client</h2>
-            <div class="sub">All months in the data set, regardless of the month filter.</div>
+            <div class="sub">All months in the data set, regardless of the month filter. Log scale.</div>
           </div>
         </div>
         <div class="chart-wrap" style="height:300px"><canvas id="trend-chart" aria-label="Bar chart of monthly tasks by client" role="img"></canvas></div>
@@ -208,23 +208,33 @@ function renderStack() {
   const hasOther = clients.some(x => x.wf.some(y => y.w.slot === 'other'));
   const slots = [...Array(MAX_SLOTS).keys(), ...(hasOther ? ['other'] : [])];
 
+  // Log scale: each bar's length is log10(client total), split into segments by each
+  // workflow's share of that total. (A plain log axis on a stack distorts the segments.)
+  const logLen = t => (t > 0 ? Math.log10(t) : 0);
+  const maxLog = Math.max(1, Math.ceil(Math.max(...clients.map(x => logLen(x.total)))));
+
   // One dataset per color slot; slot k means "the client's k-th workflow", so each bar
   // gets distinct colors and the tooltip resolves the actual workflow name per client.
-  const datasets = slots.map(slot => ({
-    label: slot === 'other' ? 'Other' : `Slot ${slot + 1}`,
-    slot,
-    data: clients.map(x => x.wf.filter(y => y.w.slot === slot).reduce((s, y) => s + y.tasks, 0)),
-    backgroundColor: slot === 'other' ? OTHER_COLOR : SERIES[slot],
-    borderColor: '#fff',
-    borderWidth: { left: 0, right: 2, top: 0, bottom: 0 },
-    borderSkipped: false,
-    barThickness: 30,
-  })).filter(d => d.data.some(v => v > 0));
+  // `tasks` holds the real values; `data` holds the scaled segment lengths.
+  const datasets = slots.map(slot => {
+    const tasks = clients.map(x => x.wf.filter(y => y.w.slot === slot).reduce((s, y) => s + y.tasks, 0));
+    return {
+      label: slot === 'other' ? 'Other' : `Slot ${slot + 1}`,
+      slot,
+      tasks,
+      data: tasks.map((t, i) => (clients[i].total ? (t / clients[i].total) * logLen(clients[i].total) : 0)),
+      backgroundColor: slot === 'other' ? OTHER_COLOR : SERIES[slot],
+      borderColor: '#fff',
+      borderWidth: { left: 0, right: 2, top: 0, bottom: 0 },
+      borderSkipped: false,
+      barThickness: 30,
+    };
+  }).filter(d => d.tasks.some(v => v > 0));
 
   const names = (clientIdx, slot) => clients[clientIdx].wf.filter(y => y.w.slot === slot);
 
   document.getElementById('stack-sub').textContent =
-    `${state.month === 'all' ? 'All time' : monthLabel(state.month, true)}. Hover a segment for the workflow.`;
+    `${state.month === 'all' ? 'All time' : monthLabel(state.month, true)}. Bar length is log scale; segments show each workflow's share of the client total. Hover a segment for the workflow.`;
   document.getElementById('stack-wrap').style.height = Math.max(140, clients.length * 56 + 50) + 'px';
 
   charts.stack?.destroy();
@@ -243,17 +253,20 @@ function renderStack() {
           position: 'segment',
           yAlign: segmentYAlign,
           caretPadding: 6,
-          filter: item => item.raw > 0,
+          filter: item => item.dataset.tasks[item.dataIndex] > 0,
           callbacks: {
             title: items => items[0]?.label,
             label: item => {
+              const t = item.dataset.tasks[item.dataIndex];
               const ws = names(item.dataIndex, item.dataset.slot).filter(y => y.tasks > 0);
-              if (item.dataset.slot !== 'other') return ` ${ws[0]?.w.name}: ${fmt(item.raw)} tasks`;
-              return [` Other (${ws.length} workflows): ${fmt(item.raw)} tasks`, ...ws.map(y => `   ${y.w.name}: ${fmt(y.tasks)}`)];
+              if (item.dataset.slot !== 'other') return ` ${ws[0]?.w.name}: ${fmt(t)} tasks`;
+              return [` Other (${ws.length} workflows): ${fmt(t)} tasks`, ...ws.map(y => `   ${y.w.name}: ${fmt(y.tasks)}`)];
             },
             footer: items => {
-              const total = clients[items[0].dataIndex].total;
-              return total ? `${((items[0].raw / total) * 100).toFixed(1)}% of client total` : '';
+              const i = items[0].dataIndex;
+              const total = clients[i].total;
+              const t = items[0].dataset.tasks[i];
+              return total ? `${((t / total) * 100).toFixed(1)}% of ${fmt(total)} client total` : '';
             },
           },
         },
@@ -261,10 +274,12 @@ function renderStack() {
       scales: {
         x: {
           stacked: true,
-          beginAtZero: true,
+          min: 0,
+          max: maxLog,
           grid: { color: '#eef0f4' },
           border: { display: false },
-          ticks: { color: '#9aa0af', font: { family: 'DM Mono', size: 11 }, callback: v => fmt(v) },
+          // Axis is in log10 units; label each power of ten with its real value.
+          ticks: { stepSize: 1, color: '#9aa0af', font: { family: 'DM Mono', size: 11 }, callback: v => fmt(10 ** v) },
         },
         y: {
           stacked: true,
@@ -331,10 +346,16 @@ function renderTrend() {
       scales: {
         x: { grid: { display: false }, border: { color: '#d8dce6' }, ticks: { color: '#5a6070', font: { size: 12 } } },
         y: {
-          beginAtZero: true,
+          type: 'logarithmic',
+          min: 1,
           grid: { color: '#eef0f4' },
           border: { display: false },
-          ticks: { color: '#9aa0af', font: { family: 'DM Mono', size: 11 }, callback: v => fmt(v) },
+          // Only label powers of ten (1, 10, 100, ...).
+          ticks: {
+            color: '#9aa0af',
+            font: { family: 'DM Mono', size: 11 },
+            callback: v => (Number.isInteger(Math.log10(v)) ? fmt(v) : ''),
+          },
         },
       },
     },
