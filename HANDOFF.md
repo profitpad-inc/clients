@@ -7,8 +7,8 @@ Everything a new thread needs to understand and continue this project quickly.
 **ProfitPad Clients** is a small static internal dashboard that reports on n8n usage per ProfitPad client. Right now it has one report page, **Task Usage**, which shows how many n8n tasks each client has consumed, broken down by workflow and month.
 
 - Production: `https://clients.profitpad.com/`
-- Local: `http://localhost/profitpad-clients/src/` (repo at `/Users/riipen/Sites/profitpad-clients`)
-- **`src/` is the web root.** Everything the website serves lives in `src/`; the production server should point its document root at `src/`. Repo docs stay at the repo root and must never go in `src/`.
+- Local: `http://localhost/profitpad-clients/docs/` (repo at `/Users/riipen/Sites/profitpad-clients`)
+- **`docs/` is the web root.** Everything the website serves lives in `docs/`; the production server should point its document root at `docs/`. Project markdown files (README, HANDOFF, AGENTS, CLAUDE) stay at the repo root and must never go in `docs/` (despite the folder name, `docs/` is the website, not documentation).
 - Visual style is copied from `https://demo.profitpad.com/` (and its `/template/` page). The favicon and logo were downloaded from `https://demo.profitpad.com/template/`.
 
 There is no build step, no package manager, and no backend in this repo. It is plain HTML, CSS and vanilla JS. Chart.js is loaded from cdnjs.
@@ -22,7 +22,7 @@ There is no build step, no package manager, and no backend in this repo. It is p
 ├── HANDOFF.md                This file.
 ├── README.md                 Short project overview.
 ├── .gitignore
-└── src/                      Web root. Everything the site serves.
+└── docs/                      Web root. Everything the site serves.
     ├── index.html            Redirects to ./dashboard/ (meta refresh + JS). Placeholder home for now.
     ├── assets/
     │   ├── styles.css        Shared layout and theme: top nav, sidebar, page header, cards, spinner, mobile layout.
@@ -35,11 +35,11 @@ There is no build step, no package manager, and no backend in this repo. It is p
 
 ### Paths must stay relative
 
-Because the site lives at the domain root in production but under `/profitpad-clients/src/` locally, every href/src is relative (`../assets/styles.css`, `./dashboard/`). Never use root-absolute paths like `/assets/...`.
+Because the site lives at the domain root in production but under `/profitpad-clients/docs/` locally, every href/src is relative (`../assets/styles.css`, `./dashboard/`). Never use root-absolute paths like `/assets/...`.
 
 ## Page layout (shared shell)
 
-Every page should use the same shell (copy it from `src/dashboard/index.html`):
+Every page should use the same shell (copy it from `docs/dashboard/index.html`):
 
 1. `<nav class="topnav">` gradient bar (`#011028` to `#0671C0`) with the ProfitPad logo linking to `../`.
 2. `<div class="layout">` containing:
@@ -47,9 +47,9 @@ Every page should use the same shell (copy it from `src/dashboard/index.html`):
    - `<main class="content"><div class="page">...</div></main>` for page content.
 3. Below 800px wide the sidebar becomes a horizontal strip under the nav.
 
-**Sidebar items currently:** only `Task Usage` (`../dashboard/`). To add a page, create `src/newpage/index.html` with the same shell, then add the new `<li>` to the sidebar in **every** page (there is no templating, the sidebar is duplicated per page).
+**Sidebar items currently:** only `Task Usage` (`../dashboard/`). To add a page, create `docs/newpage/index.html` with the same shell, then add the new `<li>` to the sidebar in **every** page (there is no templating, the sidebar is duplicated per page).
 
-Design tokens are CSS variables on `:root` in `src/assets/styles.css` (`--navy`, `--blue`, `--blue-tint`, `--bg`, `--border`, `--text`, `--text-secondary`, `--text-muted`, etc.). Cards (`.card`) have a 3px navy-to-blue gradient top bar, 14px radius, 1.5px border. Headings use `"Eastman Roman", Verdana`; body uses `Inter, "Trebuchet MS"`; mono numbers use DM Mono (Google Fonts). The site is light mode only, matching demo.profitpad.com.
+Design tokens are CSS variables on `:root` in `docs/assets/styles.css` (`--navy`, `--blue`, `--blue-tint`, `--bg`, `--border`, `--text`, `--text-secondary`, `--text-muted`, etc.). Cards (`.card`) have a 3px navy-to-blue gradient top bar, 14px radius, 1.5px border. Headings use `"Eastman Roman", Verdana`; body uses `Inter, "Trebuchet MS"`; mono numbers use DM Mono (Google Fonts). The site is light mode only, matching demo.profitpad.com.
 
 ## Data source
 
@@ -90,7 +90,7 @@ Response shape:
 - A workflow only has entries for months it actually ran.
 - At the time of writing there were 3 clients (camo, profitpad, sage), 27 workflows, months 2026-08 to 2026-10.
 
-## How the Task Usage page works (`src/dashboard/dashboard.js`)
+## How the Task Usage page works (`docs/dashboard/dashboard.js`)
 
 1. `load()` fetches the API, calls `normalize()`, stores results in `state`, and renders. A "Refresh" link at the bottom re-runs `load()`.
 2. `normalize()` converts the payload into `state.clients`:
@@ -106,10 +106,10 @@ Response shape:
    - **Workflow detail** (`renderTable`): sortable table (click headers) of client, workflow, executions, tasks, tasks/exec, last run, with a text search. Respects the month filter.
 5. All API strings are HTML-escaped with `esc()` before being inserted.
 
-The categorical palette (`SERIES` in dashboard.js and `--series-*` in src/dashboard/index.html) is a validated colorblind-safe order: blue, orange, aqua, yellow, magenta, green, violet, red, plus gray for "Other". Keep the order; never generate extra hues.
+The categorical palette (`SERIES` in dashboard.js and `--series-*` in docs/dashboard/index.html) is a validated colorblind-safe order: blue, orange, aqua, yellow, magenta, green, violet, red, plus gray for "Other". Keep the order; never generate extra hues.
 
 ## Ideas / possible next steps
 
-- Make `src/index.html` a real landing page once there is more than one report.
+- Make `docs/index.html` a real landing page once there is more than one report.
 - More reports from the same endpoint (executions per workflow, tasks per execution outliers, month over month change per client).
 - If more endpoints are added to `n8n-tools-api` (other `request=` values), add a page per report and a sidebar item for each.

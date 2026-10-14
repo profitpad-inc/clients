@@ -22,6 +22,19 @@ const state = {
 
 const charts = {};
 
+// Anchors a horizontal bar tooltip to the middle of the hovered segment, above it when there
+// is room and below it otherwise (Chart.js defaults to the segment's end, which covers the bar).
+// Pair with `yAlign: segmentYAlign`.
+Chart.Tooltip.positioners.segment = function (items) {
+  const el = items[0]?.element;
+  if (!el) return false;
+  const { x, y, base, height } = el.getProps(['x', 'y', 'base', 'height'], true);
+  const top = y - height / 2;
+  this._segmentAbove = top >= (this.height || 80) + 8;
+  return { x: (x + base) / 2, y: this._segmentAbove ? top : y + height / 2 };
+};
+const segmentYAlign = ctx => (ctx.tooltip._segmentAbove ? 'bottom' : 'top');
+
 // ---------- Helpers ----------
 
 const fmt = n => Number(n || 0).toLocaleString('en-US');
@@ -227,6 +240,9 @@ function renderStack() {
         legend: { display: false },
         tooltip: {
           ...tooltipStyle(),
+          position: 'segment',
+          yAlign: segmentYAlign,
+          caretPadding: 6,
           filter: item => item.raw > 0,
           callbacks: {
             title: items => items[0]?.label,

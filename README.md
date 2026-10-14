@@ -3,7 +3,7 @@
 Internal dashboard for reporting on n8n usage per ProfitPad client.
 
 - Production: https://clients.profitpad.com/
-- Local: http://localhost/profitpad-clients/src/
+- Local: http://localhost/profitpad-clients/docs/
 
 ## Reports
 
@@ -21,10 +21,10 @@ The webhook only allows requests (CORS) from `https://clients.profitpad.com` and
 
 ## Structure
 
-Everything served by the website lives in `src/`, which is the web root. Docs stay at the repo root.
+Everything served by the website lives in `docs/`, which is the web root. Project markdown files (README, HANDOFF, AGENTS, CLAUDE) stay at the repo root.
 
 ```
-src/
+docs/
   index.html          Redirects to ./dashboard/
   assets/             Shared styles.css, favicon and logo
   dashboard/          Task Usage page (index.html + dashboard.js)
